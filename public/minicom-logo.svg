@@ -1,0 +1,19 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="megaGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00F0FF" />
+      <stop offset="50%" stop-color="#6A00F4" />
+      <stop offset="100%" stop-color="#0A0A2A" />
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <circle cx="50" cy="50" r="48" fill="url(#megaGlow)" stroke="#00F0FF" stroke-width="1.5"/>
+  <path d="M28 70L28 30H40L50 55L60 30H72V70H62V45L52 67H48L38 45V70H28Z"
+        fill="#FFFFFF" filter="url(#glow)"/>
+</svg>
