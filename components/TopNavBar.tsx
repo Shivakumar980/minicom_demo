@@ -1,3 +1,4 @@
+// components/TopNavBar.tsx - Updated with working user selection
 "use client";
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -47,9 +48,13 @@ const TopNavBar = () => {
   const [colorTheme, setColorTheme] = useState<ThemeName>("neutral");
   const [mounted, setMounted] = useState(false);
 
-  // Email options
+  // Email options for testing
   const userEmails = [
     "user-1@example.com",
+    "alice@company.com",
+    "bob@testuser.org",
+    "support-test@demo.com",
+    "jane.doe@sample.co",
   ];
 
   // Get or set user ID from localStorage
@@ -65,8 +70,7 @@ const TopNavBar = () => {
     // Load user ID on client side
     if (typeof window !== 'undefined') {
       const savedUserId = localStorage.getItem('intercom_user_id');
-      // If existing user ID isn't an email, set to first email option
-      if (!savedUserId || !savedUserId.includes('@')) {
+      if (!savedUserId || !userEmails.includes(savedUserId)) {
         localStorage.setItem('intercom_user_id', userEmails[0]);
         setCurrentUserEmail(userEmails[0]);
       } else {
@@ -99,15 +103,22 @@ const TopNavBar = () => {
     }
   };
 
+  const handleUserChange = (email: string) => {
+    setCurrentUserEmail(email);
+    localStorage.setItem('intercom_user_id', email);
+    // Trigger a page reload to reset the conversation
+    window.location.reload();
+  };
+
   if (!mounted) {
     return null;
   }
 
   return (
-    <nav className="text-foreground p-4 flex justify-between items-center">
+    <nav className="text-foreground p-4 flex justify-between items-center border-b">
       <div className="font-bold text-sm flex gap-2 items-center">
         <div className="flex items-center">
-          <div className="text-sm mr-1 text-muted-foreground">Current User:</div>
+          <div className="text-sm mr-3 text-muted-foreground">Current User:</div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="font-mono">
@@ -118,16 +129,18 @@ const TopNavBar = () => {
               {userEmails.map((email) => (
                 <DropdownMenuItem
                   key={email}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 cursor-pointer"
+                  onClick={() => handleUserChange(email)}
                 >
                   {email === currentUserEmail && <Check className="h-4 w-4" />}
-                  {email}
+                  <span className="font-mono text-sm">{email}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
+      
       <div className="flex items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

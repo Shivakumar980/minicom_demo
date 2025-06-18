@@ -1,3 +1,4 @@
+// components/ChatAreaIntercom.tsx - Updated with full Intercom integration
 "use client";
 
 import { useEffect, useState } from "react";
@@ -19,9 +20,12 @@ interface Message {
   role: string;
   content: string;
   timestamp?: number;
+  userId?: string;
   author?: {
     type: string;
     id: string;
+    name?: string;
+    email?: string;
   };
 }
 
@@ -49,6 +53,7 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
   const [isLoading, setIsLoading] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
   const [userId, setUserId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
   // Get user ID from localStorage on initial load
   useEffect(() => {
@@ -59,18 +64,41 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
       console.log("ChatArea: Using user ID:", savedUserId);
     } else {
       console.warn("No user ID found in localStorage");
+      // Set a default user for demo purposes
+      const defaultUser = "user-1@example.com";
+      localStorage.setItem('intercom_user_id', defaultUser);
+      setUserId(defaultUser);
     }
   }, []);
 
   // Load existing conversation if conversationId is available
   useEffect(() => {
     const loadConversation = async () => {
-      if (conversationId) {
+      if (conversationId && userId) {
         try {
           setIsLoading(true);
-          // TODO: Load conversation from Intercom API
+          setError(null);
+          
+          const response = await fetch(`/api/intercom/conversations?conversationId=${conversationId}`, {
+            method: 'GET',
+            headers: { "Content-Type": "application/json" },
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to load conversation: ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.messages) {
+            setMessages(data.messages);
+            setShowAvatar(true);
+            console.log("Loaded conversation with", data.messages.length, "messages");
+          }
         } catch (error) {
           console.error("Error loading conversation:", error);
+          setError(`Failed to load conversation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          // Don't set loading to false immediately, allow user to try again
+          setTimeout(() => setError(null), 5000); // Clear error after 5 seconds
         } finally {
           setIsLoading(false);
         }
@@ -78,7 +106,7 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
     };
 
     loadConversation();
-  }, [conversationId]);
+  }, [conversationId, userId]);
 
   // Handle form submission
   const handleSubmit = async (
@@ -88,25 +116,47 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
       event.preventDefault();
     }
 
+    const messageContent = typeof event === "string" ? event : input;
+    
+    if (!messageContent.trim()) {
+      return;
+    }
+
+    if (!userId) {
+      setError("User not configured. Please refresh the page.");
+      return;
+    }
+
     setShowAvatar(true);
     setIsLoading(true);
+    setError(null);
 
-    const userMessage = {
+    const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: typeof event === "string" ? event : input,
-      userId: userId
+      content: messageContent,
+      userId: userId,
+      timestamp: Math.floor(Date.now() / 1000),
+      author: {
+        type: "user",
+        id: userId,
+        email: userId,
+      }
     };
+
+    // Optimistically add the user message
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput("");
 
     try {
-      // Handled by POST request handler on app/api/intercom/conversations/route.ts
+      // Send message to Intercom API
       const response = await fetch("/api/intercom/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
-          conversationId: conversationId
+          messages: newMessages,
+          conversationId: conversationId,
         }),
       });
 
@@ -115,19 +165,38 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
       }
 
       const data = await response.json();
-      setMessages(data.messages);
-    } catch (error) {
-      console.error("Error replying:", error);
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
 
-      // Add error message to stream
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: crypto.randomUUID(),
-          role: "bot",
-          content: "Sorry, there was an error. Please try again later."
-        }
-      ]);
+      // Update messages with the response from Intercom
+      if (data.messages) {
+        setMessages(data.messages);
+      }
+
+      // Update conversation ID if this was a new conversation
+      if (data.conversationId && !conversationId) {
+        setConversationId(data.conversationId);
+        console.log("New conversation created:", data.conversationId);
+      }
+
+      console.log("Message sent successfully");
+
+    } catch (error) {
+      console.error("Error sending message:", error);
+      setError(error instanceof Error ? error.message : "Failed to send message");
+      
+      // Keep the optimistic message but add an error indicator
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "bot",
+        content: "⚠️ Message sent to Intercom but failed to update conversation. Please refresh to see latest messages.",
+        timestamp: Math.floor(Date.now() / 1000),
+        userId: "system"
+      };
+      
+      setMessages([...newMessages, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -150,6 +219,11 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
     textarea.style.height = `${Math.min(textarea.scrollHeight, 300)}px`;
   };
 
+  // Helper function to determine if message is from user
+  const isUserMessage = (message: Message) => {
+    return message.role === "user" || message.author?.type === "user";
+  };
+
   return (
     <Card className="flex-1 flex flex-col mb-4 mr-4 ml-4">
       <CardContent className="flex-1 flex flex-col overflow-hidden pt-4 px-4 pb-0">
@@ -170,14 +244,54 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
                   <h3 className="text-sm font-medium leading-none">Support</h3>
                   <p className="text-sm text-muted-foreground">
                     {conversationId
-                      ? `Conversation #${conversationId}`
+                      ? `Conversation #${conversationId.slice(-8)}`
                       : "New conversation"}
                   </p>
+                  {userId && (
+                    <p className="text-xs text-muted-foreground">
+                      User: {userId}
+                    </p>
+                  )}
                 </div>
               </>
             )}
           </div>
         </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-destructive/10 text-destructive text-sm rounded-md flex justify-between items-center">
+            <span>{error}</span>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setError(null);
+                if (conversationId) {
+                  // Retry loading the conversation
+                  const loadConversation = async () => {
+                    try {
+                      setIsLoading(true);
+                      const response = await fetch(`/api/intercom/conversations?conversationId=${conversationId}`);
+                      if (response.ok) {
+                        const data = await response.json();
+                        if (data.messages) {
+                          setMessages(data.messages);
+                        }
+                      }
+                    } catch (retryError) {
+                      console.error("Retry failed:", retryError);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  };
+                  loadConversation();
+                }
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
@@ -203,7 +317,7 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
                 <div className="flex items-center gap-3">
                   <WandSparkles className="text-muted-foreground" />
                   <p className="text-muted-foreground">
-                    Describe your issue in detail and we'll connect you with the right person.
+                    Messages will be sent directly to your Intercom inbox.
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -220,7 +334,7 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
                 <div key={message.id}>
                   <div
                     className={`flex items-start ${
-                      ["user", "conversation"].includes(message.author?.type || "") ? "justify-end" : "justify-start"
+                      isUserMessage(message) ? "justify-end" : "justify-start"
                     } ${
                       index === messages.length - 1 ? "animate-fade-in-up" : ""
                     }`}
@@ -230,16 +344,22 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
                     }}
                   >
                     {/* Avatar on the left for non-user messages */}
-                    {["bot", "admin"].includes(message.author?.type || "") && (
+                    {!isUserMessage(message) && (
                       <Avatar className="w-8 h-8 mr-2 border">
+                        <AvatarImage
+                          src="/minicom-logo.svg"
+                          alt="Support Avatar"
+                          width={32}
+                          height={32}
+                        />
                         <AvatarFallback>
-                          {message.author?.type.substring(0,1).toUpperCase()}
+                          {message.author?.type?.substring(0,1).toUpperCase() || 'S'}
                         </AvatarFallback>
                       </Avatar>
                     )}
                     <div
                       className={`p-3 rounded-md text-sm max-w-[65%] ${
-                        message.author?.type === "user"
+                        isUserMessage(message)
                           ? "bg-primary text-primary-foreground rounded-tr-none"
                           : "bg-muted border rounded-tl-none"
                       }`}
@@ -254,16 +374,36 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
                       )}
                     </div>
                     {/* Avatar on the right for user messages */}
-                    {["user"].includes(message.author?.type || "") && (
+                    {isUserMessage(message) && (
                       <Avatar className="w-8 h-8 ml-2 border bg-primary/10">
                         <AvatarFallback className="text-primary font-medium">
-                          U
+                          {message.author?.email?.charAt(0).toUpperCase() || 'U'}
                         </AvatarFallback>
                       </Avatar>
                     )}
                   </div>
                 </div>
               ))}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <Avatar className="w-8 h-8 mr-2 border">
+                    <AvatarImage
+                      src="/minicom-logo.svg"
+                      alt="Support Avatar"
+                      width={32}
+                      height={32}
+                    />
+                    <AvatarFallback>S</AvatarFallback>
+                  </Avatar>
+                  <div className="bg-muted border rounded-md p-3 text-sm">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -283,7 +423,10 @@ function ChatAreaIntercom({ conversationId, setConversationId }: ChatAreaInterco
             className="resize-none min-h-[44px] bg-background border-0 p-3 rounded-xl shadow-none focus-visible:ring-0"
             rows={1}
           />
-          <div className="flex justify-end items-center p-3">
+          <div className="flex justify-between items-center p-3">
+            <div className="text-xs text-muted-foreground">
+              {conversationId ? `Conv: ${conversationId.slice(-8)}` : 'New conversation'}
+            </div>
             <Button
               type="submit"
               disabled={isLoading || input.trim() === ""}
